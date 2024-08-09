@@ -27,6 +27,7 @@ from autogpt_server.data.execution import (
 from autogpt_server.data.graph import Graph, Link, Node, get_graph, get_node
 from autogpt_server.util.service import AppService, expose, get_service_client
 from autogpt_server.util.settings import Config
+from autogpt_server.util.type import convert
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,6 @@ def _enqueue_next_nodes(
         # To avoid same execution to be enqueued multiple times,
         # Or the same input to be consumed multiple times.
         with synchronized(api_client, ("upsert_input", next_node_id, graph_exec_id)):
-
             # Add output data to the earliest incomplete execution, or create a new one.
             next_node_exec_id, next_node_input = wait(
                 upsert_execution_input(
@@ -281,6 +281,11 @@ def validate_exec(
     input_fields_from_schema = node_block.input_schema.get_required_fields()
     if not input_fields_from_schema.issubset(data):
         return None, f"{error_prefix} {input_fields_from_schema - set(data)}"
+
+    # Convert non-matching data types to the expected input schema.
+    for name, data_type in node_block.input_schema.__annotations__.items():
+        if (value := data.get(name)) and (type(value) is not data_type):
+            data[name] = convert(value, data_type)
 
     # Last validation: Validate the input values against the schema.
     if error := node_block.input_schema.validate_data(data):  # type: ignore
@@ -442,6 +447,7 @@ class ExecutionManager(AppService):
                 graph_id=graph_id,
                 graph_version=graph.version,
                 nodes_input=nodes_input,
+                user_id=user_id,
             )
         )
 

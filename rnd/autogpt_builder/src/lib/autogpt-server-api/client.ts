@@ -7,6 +7,7 @@ import {
   GraphMeta,
   GraphExecuteResponse,
   NodeExecutionResult,
+  User,
 } from "./types";
 
 export default class AutoGPTServerAPI {
@@ -23,6 +24,10 @@ export default class AutoGPTServerAPI {
   ) {
     this.baseUrl = baseUrl;
     this.wsUrl = `ws://${new URL(this.baseUrl).host}/ws`;
+  }
+
+  async createUser(): Promise<User> {
+    return this._request("POST", "/auth/user", {});
   }
 
   async getBlocks(): Promise<Block[]> {
@@ -242,13 +247,6 @@ export default class AutoGPTServerAPI {
   subscribeToExecution(graphId: string) {
     this.sendWebSocketMessage("subscribe", { graph_id: graphId });
   }
-
-  runGraph(
-    graphId: string,
-    data: WebsocketMessageTypeMap["run_graph"]["data"] = {},
-  ) {
-    this.sendWebSocketMessage("run_graph", { graph_id: graphId, data });
-  }
 }
 
 /* *** UTILITY TYPES *** */
@@ -264,6 +262,5 @@ type GraphCreateRequestBody =
 
 type WebsocketMessageTypeMap = {
   subscribe: { graph_id: string };
-  run_graph: { graph_id: string; data: { [key: string]: any } };
   execution_event: NodeExecutionResult;
 };
