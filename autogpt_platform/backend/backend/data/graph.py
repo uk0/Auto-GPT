@@ -2,7 +2,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Literal
 
 import prisma.types
@@ -15,7 +14,6 @@ from backend.blocks.basic import AgentInputBlock, AgentOutputBlock
 from backend.data.block import BlockInput, get_block, get_blocks
 from backend.data.db import BaseDbModel, transaction
 from backend.data.execution import ExecutionStatus
-from backend.data.user import DEFAULT_USER_ID
 from backend.util import json
 
 logger = logging.getLogger(__name__)
@@ -360,20 +358,25 @@ class Graph(GraphMeta):
         node_dict = node.model_dump()
         if hide_credentials and "constantInput" in node_dict:
             constant_input = json.loads(node_dict["constantInput"])
-            Graph._hide_credentials_in_input(constant_input)
+            constant_input = Graph._hide_credentials_in_input(constant_input)
             node_dict["constantInput"] = json.dumps(constant_input)
         return Node.from_db(AgentNode(**node_dict))
 
     @staticmethod
-    def _hide_credentials_in_input(input_data: dict[str, Any]):
+    def _hide_credentials_in_input(input_data: dict[str, Any]) -> dict[str, Any]:
         sensitive_keys = ["credentials", "api_key", "password", "token", "secret"]
+        result = {}
         for key, value in input_data.items():
             if isinstance(value, dict):
-                Graph._hide_credentials_in_input(value)
+                result[key] = Graph._hide_credentials_in_input(value)
             elif isinstance(value, str) and any(
                 sensitive_key in key.lower() for sensitive_key in sensitive_keys
             ):
-                del input_data[key]
+                # Skip this key-value pair in the result
+                continue
+            else:
+                result[key] = value
+        return result
 
 
 AGENT_NODE_INCLUDE: prisma.types.AgentNodeInclude = {
@@ -606,32 +609,3 @@ async def __create_graph(tx, graph: Graph, user_id: str):
             for link in graph.links
         ]
     )
-
-
-# --------------------- Helper functions --------------------- #
-
-
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "graph_templates"
-
-
-async def import_packaged_templates() -> None:
-    templates_in_db = await get_graphs_meta(
-        user_id=DEFAULT_USER_ID, filter_by="template"
-    )
-
-    logging.info("Loading templates...")
-    for template_file in TEMPLATES_DIR.glob("*.json"):
-        template_data = json.loads(template_file.read_bytes())
-
-        template = Graph.model_validate(template_data)
-        if not template.is_template:
-            logging.warning(
-                f"pre-packaged graph file {template_file} is not a template"
-            )
-            continue
-        if (
-            exists := next((t for t in templates_in_db if t.id == template.id), None)
-        ) and exists.version >= template.version:
-            continue
-        await create_graph(template, DEFAULT_USER_ID)
-        logging.info(f"Loaded template '{template.name}' ({template.id})")
